@@ -1,0 +1,89 @@
+@import 'tailwindcss';
+
+/* ── Doorkey design tokens ──────────────────────────────────────────────
+   Identity: thresholds and keys. Paper-cool surfaces, ink structure, a
+   brass accent borrowed from door furniture — credible to investors,
+   warm to founders. Green is reserved to mean "relevant", never decoration. */
+
+@theme {
+  --color-paper: #f7f6f3;
+  --color-paper-raised: #fffefc;
+  --color-ink: #111a22;
+  --color-ink-soft: #2b3742;
+  --color-muted: #5e6771;
+  --color-line: #e2ded6;
+  --color-line-strong: #cdc7bb;
+  --color-brass: #b0813a;
+  --color-brass-soft: #f0e7d6;
+  --color-signal: #215f4f;
+  --color-signal-soft: #e4efe9;
+  --color-alert: #9a3324;
+  --color-alert-soft: #f7e7e4;
+
+  --font-display: 'Fraunces', ui-serif, Georgia, serif;
+  --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-card: 10px;
+  --radius-pill: 999px;
+}
+
+:root {
+  --surface: var(--color-paper);
+  --on-surface: var(--color-ink);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: 'ss01', 'cv05';
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.08;
+}
+
+/* Visible keyboard focus everywhere (§30) */
+:focus-visible {
+  outline: 2px solid var(--color-brass);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+::selection { background: var(--color-brass-soft); }
+
+/* The threshold rule: a brass upright that marks the start of a section.
+   Structural, not decorative — it only appears where a section begins. */
+.threshold {
+  border-left: 2px solid var(--color-brass);
+  padding-left: 1rem;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  padding: 0.75rem 1rem;
+  z-index: 100;
+}
+.skip-link:focus { left: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

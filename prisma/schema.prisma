@@ -1,0 +1,708 @@
+// Doorkey — data model
+// Social graph edges are User -> User (authorization derives from the session's
+// userId with no extra lookup). Profile is a 1-1 presentation record that owns
+// visibility. Controlled vocabularies (Industry / Sector / Geography) are tables,
+// not free text, so filtering and matching stay reliable.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum Role {
+  ENTREPRENEUR
+  INVESTOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum Visibility {
+  PUBLIC
+  CONNECTION_ONLY
+  PRIVATE
+}
+
+enum InvestorType {
+  ANGEL
+  VENTURE_CAPITAL
+  MICRO_VC
+  FAMILY_OFFICE
+  CORPORATE_VC
+  ACCELERATOR
+  SYNDICATE
+  GOVERNMENT_FUND
+}
+
+enum StartupStage {
+  IDEA
+  PRE_SEED
+  SEED
+  SERIES_A
+  SERIES_B
+  GROWTH
+}
+
+enum BusinessModel {
+  B2B_SAAS
+  B2C
+  MARKETPLACE
+  HARDWARE
+  DEEP_TECH
+  FINTECH_INFRA
+  SERVICES
+  OPEN_SOURCE
+}
+
+enum FounderGoal {
+  FUNDING
+  MENTORSHIP
+  PARTNERSHIPS
+  INTRODUCTIONS
+  HIRING
+  OTHER
+}
+
+enum Currency {
+  GBP
+  USD
+  EUR
+  INR
+  SGD
+}
+
+enum ConnectionStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+  BLOCKED
+}
+
+enum IntroductionStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+enum NotificationType {
+  CONNECTION_REQUEST
+  CONNECTION_ACCEPTED
+  NEW_MESSAGE
+  INTRODUCTION_REQUEST
+  INTRODUCTION_ACCEPTED
+  NEW_RECOMMENDATION
+  VERIFICATION_UPDATE
+  ACCOUNT_NOTICE
+}
+
+enum VerificationType {
+  EMAIL
+  IDENTITY
+  ORGANIZATION
+  INVESTOR_REVIEW
+  STARTUP_REVIEW
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum ReportCategory {
+  SPAM
+  FRAUD
+  HARASSMENT
+  MISREPRESENTATION
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum TokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum AIFeature {
+  PROFILE_ASSISTANT
+  INTRODUCTION_ASSISTANT
+  STARTUP_SUMMARY
+}
+
+enum AIRequestStatus {
+  OK
+  FAILED
+  REJECTED
+}
+
+// ---------------------------------------------------------------- account
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @unique
+  passwordHash    String?
+  googleId        String?    @unique
+  role            Role       @default(ENTREPRENEUR)
+  status          UserStatus @default(ACTIVE)
+  emailVerifiedAt DateTime?
+  isDemo          Boolean    @default(false)
+
+  onboardingStep        Int       @default(0)
+  onboardingCompletedAt DateTime?
+
+  notifyByEmail    Boolean @default(true)
+  notifyOnMessage  Boolean @default(true)
+  notifyOnRequest  Boolean @default(true)
+  notifyOnMatch    Boolean @default(true)
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  profile  Profile?
+  sessions Session[]
+  tokens   AuthToken[]
+
+  sentRequests     ConnectionRequest[] @relation("RequestSender")
+  receivedRequests ConnectionRequest[] @relation("RequestRecipient")
+  connectionsA     Connection[]        @relation("ConnectionA")
+  connectionsB     Connection[]        @relation("ConnectionB")
+
+  blocksMade      Block[] @relation("Blocker")
+  blocksReceived  Block[] @relation("Blocked")
+
+  participations ConversationParticipant[]
+  messages       Message[]
+
+  introsSent     IntroductionRequest[] @relation("IntroRequester")
+  introsReceived IntroductionRequest[] @relation("IntroTarget")
+  introsBrokered IntroductionRequest[] @relation("IntroConnector")
+
+  savedProfiles   SavedProfile[] @relation("SavedOwner")
+  savedByOthers   SavedProfile[] @relation("SavedSubject")
+
+  recommendations Recommendation[] @relation("RecommendationOwner")
+  recommendedIn   Recommendation[] @relation("RecommendationSubject")
+
+  notifications  Notification[] @relation("NotificationOwner")
+  actedIn        Notification[] @relation("NotificationActor")
+
+  verifications      Verification[] @relation("VerificationSubject")
+  verificationsBy    Verification[] @relation("VerificationReviewer")
+  reportsMade        Report[]       @relation("Reporter")
+  reportsAbout       Report[]       @relation("ReportSubject")
+  reportsHandled     Report[]       @relation("ReportHandler")
+  auditLogs          AuditLog[]
+  aiRequests         AIRequest[]
+  events             AnalyticsEvent[]
+
+  @@index([role, status])
+  @@index([createdAt])
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  expiresAt DateTime
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuthToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  type      TokenType
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+// ---------------------------------------------------------------- profile
+
+model Profile {
+  id          String     @id @default(uuid()) @db.Uuid
+  userId      String     @unique @db.Uuid
+  slug        String     @unique
+  displayName String
+  headline    String?
+  bio         String?
+  photoUrl    String?
+  linkedinUrl String?
+  websiteUrl  String?
+  geographyId String?    @db.Uuid
+  visibility  Visibility @default(PUBLIC)
+  showEmail   Boolean    @default(false)
+  completion  Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  geography  Geography?  @relation(fields: [geographyId], references: [id])
+
+  entrepreneur EntrepreneurProfile?
+  investor     InvestorProfile?
+  founderOf    Founder[]
+
+  @@index([visibility])
+  @@index([geographyId])
+}
+
+model EntrepreneurProfile {
+  id        String        @id @default(uuid()) @db.Uuid
+  profileId String        @unique @db.Uuid
+  goals     FounderGoal[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+}
+
+model InvestorProfile {
+  id             String       @id @default(uuid()) @db.Uuid
+  profileId      String       @unique @db.Uuid
+  investorType   InvestorType
+  organizationId String?      @db.Uuid
+  thesis         String?
+  expertise      String[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  profile      Profile            @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  organization Organization?      @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  preference   FundingPreference?
+  portfolio    PortfolioCompany[]
+
+  @@index([investorType])
+  @@index([organizationId])
+}
+
+model Organization {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  slug       String   @unique
+  websiteUrl String?
+  logoUrl    String?
+  about      String?
+  verified   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  investors InvestorProfile[]
+}
+
+model FundingPreference {
+  id                String         @id @default(uuid()) @db.Uuid
+  investorProfileId String         @unique @db.Uuid
+  stages            StartupStage[]
+  minCheque         Int
+  maxCheque         Int
+  currency          Currency       @default(GBP)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  investorProfile InvestorProfile @relation(fields: [investorProfileId], references: [id], onDelete: Cascade)
+  sectors         Sector[]        @relation("PreferenceSectors")
+  industries      Industry[]      @relation("PreferenceIndustries")
+  geographies     Geography[]     @relation("PreferenceGeographies")
+}
+
+model PortfolioCompany {
+  id                String  @id @default(uuid()) @db.Uuid
+  investorProfileId String  @db.Uuid
+  name              String
+  url               String?
+  year              Int?
+  note              String?
+  sectorId          String? @db.Uuid
+
+  investorProfile InvestorProfile @relation(fields: [investorProfileId], references: [id], onDelete: Cascade)
+  sector          Sector?         @relation(fields: [sectorId], references: [id], onDelete: SetNull)
+
+  @@index([investorProfileId])
+}
+
+// ---------------------------------------------------------------- startup
+
+model Startup {
+  id            String        @id @default(uuid()) @db.Uuid
+  slug          String        @unique
+  name          String
+  logoUrl       String?
+  oneLiner      String
+  description   String?
+  industryId    String        @db.Uuid
+  geographyId   String?       @db.Uuid
+  stage         StartupStage
+  businessModel BusinessModel
+  foundedYear   Int?
+  teamSize      Int?
+  websiteUrl    String?
+
+  amountRaised    Int?
+  amountSeeking   Int?
+  currency        Currency @default(GBP)
+  previousFunding String?
+
+  revenueAnnual Int?
+  userCount     Int?
+  customerCount Int?
+  growthNote    String?
+  tractionNote  String?
+
+  visibility Visibility @default(PUBLIC)
+  isDemo     Boolean    @default(false)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  industry  Industry   @relation(fields: [industryId], references: [id])
+  geography Geography? @relation(fields: [geographyId], references: [id])
+  sectors   Sector[]   @relation("StartupSectors")
+  founders  Founder[]
+  reports   Report[]   @relation("ReportStartup")
+
+  @@index([stage])
+  @@index([industryId])
+  @@index([geographyId])
+  @@index([visibility, stage])
+}
+
+model Founder {
+  id        String   @id @default(uuid()) @db.Uuid
+  profileId String   @db.Uuid
+  startupId String   @db.Uuid
+  title     String   @default("Founder")
+  isPrimary Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  startup Startup @relation(fields: [startupId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, startupId])
+  @@index([startupId])
+}
+
+// ------------------------------------------------- controlled vocabulary
+
+model Industry {
+  id   String @id @default(uuid()) @db.Uuid
+  code String @unique
+  name String
+
+  sectors     Sector[]
+  startups    Startup[]
+  preferences FundingPreference[] @relation("PreferenceIndustries")
+}
+
+model Sector {
+  id         String @id @default(uuid()) @db.Uuid
+  code       String @unique
+  name       String
+  industryId String @db.Uuid
+
+  industry    Industry            @relation(fields: [industryId], references: [id], onDelete: Cascade)
+  startups    Startup[]           @relation("StartupSectors")
+  preferences FundingPreference[] @relation("PreferenceSectors")
+  portfolio   PortfolioCompany[]
+
+  @@index([industryId])
+}
+
+model Geography {
+  id     String  @id @default(uuid()) @db.Uuid
+  code   String  @unique
+  name   String
+  region String
+  isAny  Boolean @default(false)
+
+  profiles    Profile[]
+  startups    Startup[]
+  preferences FundingPreference[] @relation("PreferenceGeographies")
+}
+
+// ---------------------------------------------------------------- graph
+
+model ConnectionRequest {
+  id          String           @id @default(uuid()) @db.Uuid
+  requesterId String           @db.Uuid
+  recipientId String           @db.Uuid
+  status      ConnectionStatus @default(PENDING)
+  message     String?
+  createdAt   DateTime         @default(now())
+  respondedAt DateTime?
+
+  requester  User        @relation("RequestSender", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient  User        @relation("RequestRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  connection Connection?
+
+  @@unique([requesterId, recipientId])
+  @@index([recipientId, status])
+  @@index([requesterId, status])
+}
+
+/// Canonical ordering: userAId < userBId (string compare), enforced in the
+/// service layer so a pair can only ever have one row.
+model Connection {
+  id             String   @id @default(uuid()) @db.Uuid
+  userAId        String   @db.Uuid
+  userBId        String   @db.Uuid
+  requestId      String?  @unique @db.Uuid
+  conversationId String?  @db.Uuid
+  createdAt      DateTime @default(now())
+
+  userA        User               @relation("ConnectionA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB        User               @relation("ConnectionB", fields: [userBId], references: [id], onDelete: Cascade)
+  request      ConnectionRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  conversation Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+}
+
+model Block {
+  id        String   @id @default(uuid()) @db.Uuid
+  blockerId String   @db.Uuid
+  blockedId String   @db.Uuid
+  reason    String?
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+// ------------------------------------------------------------ messaging
+
+model Conversation {
+  id            String   @id @default(uuid()) @db.Uuid
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  connections  Connection[]
+  intros       IntroductionRequest[]
+
+  @@index([lastMessageAt])
+}
+
+model ConversationParticipant {
+  id             String    @id @default(uuid()) @db.Uuid
+  conversationId String    @db.Uuid
+  userId         String    @db.Uuid
+  lastReadAt     DateTime?
+  joinedAt       DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @db.Uuid
+  senderId       String   @db.Uuid
+  body           String
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model IntroductionRequest {
+  id             String             @id @default(uuid()) @db.Uuid
+  requesterId    String             @db.Uuid
+  targetId       String             @db.Uuid
+  connectorId    String?            @db.Uuid
+  message        String?
+  status         IntroductionStatus @default(PENDING)
+  conversationId String?            @db.Uuid
+  createdAt      DateTime           @default(now())
+  respondedAt    DateTime?
+
+  requester    User          @relation("IntroRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  target       User          @relation("IntroTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  connector    User?         @relation("IntroConnector", fields: [connectorId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([targetId, status])
+  @@index([requesterId, status])
+}
+
+model SavedProfile {
+  id        String   @id @default(uuid()) @db.Uuid
+  ownerId   String   @db.Uuid
+  subjectId String   @db.Uuid
+  note      String?
+  createdAt DateTime @default(now())
+
+  owner   User @relation("SavedOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  subject User @relation("SavedSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, subjectId])
+  @@index([subjectId])
+}
+
+model Recommendation {
+  id         String   @id @default(uuid()) @db.Uuid
+  ownerId    String   @db.Uuid
+  subjectId  String   @db.Uuid
+  score      Int
+  reasons    String[]
+  dismissed  Boolean  @default(false)
+  computedAt DateTime @default(now())
+
+  owner   User @relation("RecommendationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  subject User @relation("RecommendationSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, subjectId])
+  @@index([ownerId, score])
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  actorId   String?          @db.Uuid
+  type      NotificationType
+  title     String
+  body      String?
+  url       String?
+  entityId  String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user  User  @relation("NotificationOwner", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------- trust & safety
+
+model Verification {
+  id          String             @id @default(uuid()) @db.Uuid
+  userId      String             @db.Uuid
+  type        VerificationType
+  status      VerificationStatus @default(UNVERIFIED)
+  evidenceUrl String?
+  note        String?
+  reviewedById String?           @db.Uuid
+  reviewedAt  DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user       User  @relation("VerificationSubject", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("VerificationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, type])
+  @@index([status])
+}
+
+model Report {
+  id             String         @id @default(uuid()) @db.Uuid
+  reporterId     String         @db.Uuid
+  subjectUserId  String?        @db.Uuid
+  subjectStartupId String?      @db.Uuid
+  category       ReportCategory
+  details        String?
+  status         ReportStatus   @default(OPEN)
+  resolutionNote String?
+  handledById    String?        @db.Uuid
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  reporter       User     @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  subjectUser    User?    @relation("ReportSubject", fields: [subjectUserId], references: [id], onDelete: Cascade)
+  subjectStartup Startup? @relation("ReportStartup", fields: [subjectStartupId], references: [id], onDelete: Cascade)
+  handledBy      User?    @relation("ReportHandler", fields: [handledById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+// ------------------------------------------------------------ ai & events
+
+model AIRequest {
+  id           String          @id @default(uuid()) @db.Uuid
+  userId       String          @db.Uuid
+  feature      AIFeature
+  provider     String
+  model        String
+  status       AIRequestStatus @default(OK)
+  inputHash    String
+  inputChars   Int             @default(0)
+  outputChars  Int             @default(0)
+  latencyMs    Int             @default(0)
+  error        String?
+  createdAt    DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([feature])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  name      String
+  props     Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([name, createdAt])
+  @@index([userId])
+}
